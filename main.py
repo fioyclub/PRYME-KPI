@@ -365,6 +365,97 @@ def comprehensive_health_check() -> dict:
         return health_results
 
 
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /start command"""
+    try:
+        user = update.effective_user
+        user_id = user.id
+        user_name = user.first_name or "User"
+        
+        logger.info(f"User {user_id} ({user_name}) started the bot")
+        
+        # Check user role
+        import auth
+        user_role = auth.get_user_role(user_id)
+        
+        if user_role == 'admin':
+            welcome_message = f"""
+🎉 **欢迎管理员 {user_name}！**
+
+您可以使用以下管理员命令：
+📊 /check - 查看销售代表的KPI完成情况
+🎯 /setting - 为销售代表设置月度KPI目标
+
+您的管理员权限已激活！
+"""
+        else:
+            welcome_message = f"""
+👋 **欢迎 {user_name}！**
+
+我是KPI跟踪机器人，可以帮助您：
+
+**销售代表功能：**
+📝 /register - 注册个人信息
+📈 /kpi - 查看个人KPI进度
+🤝 /submitkpi - 提交会面记录和照片
+💰 /submitsale - 提交销售记录和照片
+
+请先使用 /register 注册您的信息！
+"""
+        
+        await update.message.reply_text(welcome_message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in start command: {e}")
+        await update.message.reply_text("❌ 启动时出现错误，请稍后重试。")
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /help command"""
+    try:
+        user = update.effective_user
+        user_id = user.id
+        
+        import auth
+        user_role = auth.get_user_role(user_id)
+        
+        if user_role == 'admin':
+            help_message = """
+🔧 **管理员帮助**
+
+**可用命令：**
+📊 /check - 查看销售代表KPI
+🎯 /setting - 设置KPI目标
+
+**使用说明：**
+1. 使用 /check 选择销售代表查看其KPI完成情况
+2. 使用 /setting 为销售代表设置月度目标
+3. 所有数据自动保存到Google Sheets
+"""
+        else:
+            help_message = """
+📱 **销售代表帮助**
+
+**可用命令：**
+📝 /register - 注册个人信息
+📈 /kpi - 查看KPI进度
+🤝 /submitkpi - 提交会面记录
+💰 /submitsale - 提交销售记录
+
+**使用流程：**
+1. 首先使用 /register 注册
+2. 使用 /kpi 查看当前进度
+3. 使用 /submitkpi 提交会面照片
+4. 使用 /submitsale 提交销售照片
+"""
+        
+        await update.message.reply_text(help_message, parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Error in help command: {e}")
+        await update.message.reply_text("❌ 获取帮助时出现错误。")
+
+
 async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Global error handler for the bot
@@ -415,6 +506,12 @@ def setup_handlers(application: Application) -> None:
         # Register global error handler first
         application.add_error_handler(global_error_handler)
         logger.info("Global error handler registered")
+        
+        # Register basic commands
+        from telegram.ext import CommandHandler
+        application.add_handler(CommandHandler("start", start_command))
+        application.add_handler(CommandHandler("help", help_command))
+        logger.info("Basic commands registered (/start, /help)")
         
         # Import and register admin handlers
         try:
