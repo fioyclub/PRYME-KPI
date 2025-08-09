@@ -348,7 +348,42 @@ def main() -> None:
         logger.info("Starting Telegram KPI Bot initialization...")
         log_system_event("bot_startup", "Bot initialization started")
         
-        # Perform comprehensive system health check
+        # Initialize authentication system first
+        logger.info("Initializing authentication system...")
+        if not auth.initialize_auth_system():
+            error_msg = "Failed to initialize authentication system"
+            logger.error(error_msg)
+            log_system_event("auth_init_failed", error_msg, "ERROR")
+            return
+        
+        log_system_event("auth_initialized", "Authentication system initialized successfully")
+        
+        # Initialize Google APIs
+        logger.info("Initializing Google APIs...")
+        
+        # Initialize Google Sheets
+        import google_sheets
+        if not google_sheets.authenticate_google_sheets():
+            error_msg = "Failed to authenticate Google Sheets"
+            logger.error(error_msg)
+            log_system_event("google_sheets_auth_failed", error_msg, "ERROR")
+            # Don't return here, continue with limited functionality
+        else:
+            logger.info("Google Sheets authentication successful")
+            log_system_event("google_sheets_authenticated", "Google Sheets initialized successfully")
+        
+        # Initialize Google Drive
+        import google_drive
+        if not google_drive.authenticate_google_drive():
+            error_msg = "Failed to authenticate Google Drive"
+            logger.error(error_msg)
+            log_system_event("google_drive_auth_failed", error_msg, "ERROR")
+            # Don't return here, continue with limited functionality
+        else:
+            logger.info("Google Drive authentication successful")
+            log_system_event("google_drive_authenticated", "Google Drive initialized successfully")
+        
+        # Now perform comprehensive system health check
         logger.info("Performing comprehensive system health check...")
         health_results = comprehensive_health_check()
         logger.info(f"System health check completed: {health_results['overall_status']}")
@@ -378,16 +413,6 @@ def main() -> None:
             logger.warning("System health check shows degraded performance.")
             logger.warning(f"Warnings: {health_results['warnings']}")
             log_system_event("health_check_degraded", f"Warnings: {health_results['warnings']}", "WARNING")
-        
-        # Initialize authentication system
-        logger.info("Initializing authentication system...")
-        if not auth.initialize_auth_system():
-            error_msg = "Failed to initialize authentication system"
-            logger.error(error_msg)
-            log_system_event("auth_init_failed", error_msg, "ERROR")
-            return
-        
-        log_system_event("auth_initialized", "Authentication system initialized successfully")
         
         # Get bot token from environment variable
         bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
