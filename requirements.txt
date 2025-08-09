@@ -1,5 +1,5 @@
 # Core Telegram Bot Framework
-python-telegram-bot==20.7
+python-telegram-bot>=20.7,<23
 
 # Google APIs Integration
 google-api-python-client==2.108.0
