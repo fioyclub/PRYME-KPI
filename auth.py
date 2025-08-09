@@ -426,10 +426,9 @@ def initialize_auth_system() -> bool:
         bool: True if initialization successful, False otherwise
     """
     try:
-        # Initialize Google Sheets authentication
-        if not google_sheets.authenticate_google_sheets():
-            logger.error("Failed to authenticate Google Sheets")
-            return False
+        # Check if Google Sheets service is available
+        if not google_sheets.sheets_service.service:
+            logger.warning("Google Sheets service not initialized, admin cache will be limited")
         
         # Initialize admin cache
         if not role_manager._initialize_admin_cache():
