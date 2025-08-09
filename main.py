@@ -8,11 +8,14 @@ It initializes the bot, sets up handlers, and manages the application lifecycle.
 
 import logging
 import os
+import threading
 from datetime import datetime
 from telegram.ext import Application
 from telegram import Update
 from telegram.ext import ContextTypes
 from dotenv import load_dotenv
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
 
 # Import error handling system first
 from error_handler import setup_logging, error_handler, log_system_event, check_system_health
@@ -27,6 +30,122 @@ setup_logging(
     log_level=os.getenv('LOG_LEVEL', 'INFO'),
     log_file=os.getenv('LOG_FILE', 'kpi_bot.log')
 )
+logger = logging.getLogger(__name__)
+
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for health checks and status"""
+    
+    def do_GET(self):
+        """Handle GET requests"""
+        try:
+            if self.path == '/':
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                
+                html_content = """
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Telegram KPI Bot</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f5f5f5; }
+                        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                        .status { padding: 15px; border-radius: 5px; margin: 20px 0; }
+                        .running { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+                        .info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+                        h1 { color: #333; text-align: center; }
+                        .emoji { font-size: 1.2em; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1><span class="emoji">🤖</span> Telegram KPI Bot</h1>
+                        <div class="status running">
+                            <strong>✅ Status:</strong> Bot is running and listening for updates
+                        </div>
+                        <div class="info">
+                            <strong>📊 Function:</strong> KPI tracking and management for sales teams
+                        </div>
+                        <div class="info">
+                            <strong>🔧 Features:</strong>
+                            <ul>
+                                <li>Sales representative registration</li>
+                                <li>KPI target setting and tracking</li>
+                                <li>Photo upload to Google Drive</li>
+                                <li>Data storage in Google Sheets</li>
+                                <li>Admin and sales role management</li>
+                            </ul>
+                        </div>
+                        <div class="info">
+                            <strong>🚀 Deployment:</strong> Running on Render Web Service
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                self.wfile.write(html_content.encode())
+                
+            elif self.path == '/health':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                health_data = {
+                    "status": "healthy",
+                    "service": "Telegram KPI Bot",
+                    "timestamp": datetime.now().isoformat(),
+                    "uptime": "running"
+                }
+                self.wfile.write(json.dumps(health_data).encode())
+                
+            elif self.path == '/status':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                status_data = {
+                    "bot_status": "running",
+                    "service_type": "telegram_bot",
+                    "features": [
+                        "sales_registration",
+                        "kpi_tracking", 
+                        "photo_upload",
+                        "admin_management"
+                    ],
+                    "timestamp": datetime.now().isoformat()
+                }
+                self.wfile.write(json.dumps(status_data).encode())
+                
+            else:
+                self.send_response(404)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Not Found')
+                
+        except Exception as e:
+            logger.error(f"HTTP handler error: {e}")
+            self.send_response(500)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Internal Server Error')
+    
+    def log_message(self, format, *args):
+        """Override to use our logger instead of stderr"""
+        logger.info(f"HTTP: {format % args}")
+
+
+def start_http_server(port: int = 10000):
+    """Start HTTP server in a separate thread"""
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        logger.info(f"HTTP server starting on port {port}")
+        server.serve_forever()
+    except Exception as e:
+        logger.error(f"HTTP server error: {e}")
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -455,6 +574,13 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Error initializing memory management: {e}")
             log_system_event("memory_management_error", f"Memory management initialization failed: {e}", "ERROR")
+        
+        # Start HTTP server for Render Web Service
+        port = int(os.getenv('PORT', 10000))
+        logger.info(f"Starting HTTP server on port {port}")
+        http_thread = threading.Thread(target=start_http_server, args=(port,), daemon=True)
+        http_thread.start()
+        log_system_event("http_server_started", f"HTTP server started on port {port}")
         
         logger.info("Starting Telegram KPI Bot polling...")
         log_system_event("bot_started", "Bot started and listening for updates")
