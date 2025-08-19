@@ -493,7 +493,20 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
         update: The update that caused the error
         context: The context object
     """
-    logger.error(f"Exception while handling an update: {context.error}")
+    error_str = str(context.error)
+    logger.error(f"Exception while handling an update: {error_str}")
+    
+    # Special handling for conflict errors
+    if 'conflict' in error_str.lower() and 'getUpdates' in error_str:
+        logger.error("🚨 CRITICAL: Bot conflict detected!")
+        logger.error("🚨 Another instance is running with the same token!")
+        logger.error("🚨 This service will attempt to continue but may be unstable.")
+        
+        # Log critical system event
+        log_system_event("bot_conflict_critical", f"Multiple instances detected: {error_str}", "CRITICAL")
+        
+        # Don't try to send message to user for conflict errors
+        return
     
     # Get user ID if available
     user_id = None
@@ -703,7 +716,24 @@ def main() -> None:
             error_msg = "Failed to verify bot identity or clear webhook"
             logger.error(error_msg)
             log_system_event("bot_verification_failed", error_msg, "ERROR")
-            return
+            # Continue anyway to avoid deployment failures
+            logger.warning("⚠️  Continuing despite verification failure...")
+        
+        # Additional conflict prevention
+        logger.info("🛡️  Step 1.5: Additional conflict prevention...")
+        try:
+            import requests
+            # Force delete webhook multiple times to ensure it's gone
+            for i in range(3):
+                delete_response = requests.post(f"https://api.telegram.org/bot{bot_token}/deleteWebhook", timeout=3)
+                if delete_response.status_code == 200:
+                    logger.info(f"✅ Webhook deletion attempt {i+1}/3 successful")
+                else:
+                    logger.warning(f"⚠️  Webhook deletion attempt {i+1}/3 failed")
+                import time
+                time.sleep(1)
+        except Exception as e:
+            logger.warning(f"⚠️  Additional webhook cleanup failed: {e}")
         
         # Initialize authentication system
         logger.info("🔧 Step 2: Initializing authentication system...")
