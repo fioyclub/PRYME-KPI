@@ -840,11 +840,33 @@ def main() -> None:
         logger.info("   - Mode: Long Polling (getUpdates)")
         log_system_event("bot_started", "Bot started and listening for updates via polling")
         
-        # Start the bot with polling
-        application.run_polling(
-            allowed_updates=['message', 'callback_query'],
-            drop_pending_updates=True
-        )
+        # Start the bot with polling (with conflict handling)
+        try:
+            application.run_polling(
+                allowed_updates=['message', 'callback_query'],
+                drop_pending_updates=True
+            )
+        except Exception as polling_error:
+            if 'conflict' in str(polling_error).lower():
+                logger.error("🚨 Polling conflict detected! Another instance may be running.")
+                logger.error("Waiting 30 seconds before retrying...")
+                import time
+                time.sleep(30)
+                
+                # Try to clear any webhook and retry once
+                try:
+                    import requests
+                    requests.post(f"https://api.telegram.org/bot{bot_token}/deleteWebhook", timeout=5)
+                    logger.info("Cleared webhook and retrying polling...")
+                    application.run_polling(
+                        allowed_updates=['message', 'callback_query'],
+                        drop_pending_updates=True
+                    )
+                except Exception as retry_error:
+                    logger.error(f"Retry failed: {retry_error}")
+                    raise
+            else:
+                raise
         
     except KeyboardInterrupt:
         logger.info("Bot stopped by user (Ctrl+C)")
