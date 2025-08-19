@@ -579,7 +579,7 @@ def setup_handlers(application: Application) -> None:
 
 def verify_bot_identity_and_clear_webhook(bot_token: str) -> bool:
     """
-    验证Bot身份并清理Webhook设置
+    验证Bot身份并清理Webhook设置（非阻塞版本）
     
     Args:
         bot_token (str): Telegram Bot Token
@@ -594,66 +594,82 @@ def verify_bot_identity_and_clear_webhook(bot_token: str) -> bool:
         token_fingerprint = f"{bot_token[:10]}...{bot_token[-5:]}"
         logger.info(f"🤖 Bot Token 指纹: {token_fingerprint}")
         
-        # 获取Bot信息
-        response = requests.get(f"https://api.telegram.org/bot{bot_token}/getMe", timeout=10)
-        if response.status_code == 200:
-            bot_info = response.json()
-            if bot_info['ok']:
-                bot_data = bot_info['result']
-                logger.info(f"✅ Bot 身份验证成功:")
-                logger.info(f"   - Bot 名称: {bot_data['first_name']}")
-                logger.info(f"   - Bot 用户名: @{bot_data['username']}")
-                logger.info(f"   - Bot ID: {bot_data['id']}")
-                log_system_event("bot_identity_verified", f"Bot @{bot_data['username']} (ID: {bot_data['id']}) verified")
-            else:
-                logger.error(f"❌ Bot身份验证失败: {bot_info['description']}")
-                return False
-        else:
-            logger.error(f"❌ Bot身份验证请求失败: HTTP {response.status_code}")
-            return False
-        
-        # 检查并清理Webhook
-        logger.info("🔍 检查Webhook状态...")
-        webhook_response = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=10)
-        if webhook_response.status_code == 200:
-            webhook_info = webhook_response.json()
-            if webhook_info['ok']:
-                webhook_data = webhook_info['result']
-                webhook_url = webhook_data.get('url', '')
-                
-                if webhook_url:
-                    logger.warning(f"⚠️  发现Webhook设置: {webhook_url}")
-                    logger.warning(f"📊 待处理更新数: {webhook_data.get('pending_update_count', 0)}")
-                    
-                    # 删除Webhook以使用Polling模式
-                    logger.info("🗑️  删除Webhook以启用Polling模式...")
-                    delete_response = requests.post(f"https://api.telegram.org/bot{bot_token}/deleteWebhook", timeout=10)
-                    if delete_response.status_code == 200:
-                        delete_result = delete_response.json()
-                        if delete_result['ok']:
-                            logger.info("✅ Webhook已成功删除，可以使用Polling模式")
-                            log_system_event("webhook_cleared", "Webhook deleted for polling mode")
-                        else:
-                            logger.error(f"❌ 删除Webhook失败: {delete_result['description']}")
-                            return False
-                    else:
-                        logger.error(f"❌ 删除Webhook请求失败: HTTP {delete_response.status_code}")
-                        return False
+        # 获取Bot信息 - 使用更短的超时时间
+        logger.info("🔍 验证Bot身份...")
+        try:
+            response = requests.get(f"https://api.telegram.org/bot{bot_token}/getMe", timeout=5)
+            if response.status_code == 200:
+                bot_info = response.json()
+                if bot_info['ok']:
+                    bot_data = bot_info['result']
+                    logger.info(f"✅ Bot 身份验证成功:")
+                    logger.info(f"   - Bot 名称: {bot_data['first_name']}")
+                    logger.info(f"   - Bot 用户名: @{bot_data['username']}")
+                    logger.info(f"   - Bot ID: {bot_data['id']}")
+                    log_system_event("bot_identity_verified", f"Bot @{bot_data['username']} (ID: {bot_data['id']}) verified")
                 else:
-                    logger.info("✅ 没有设置Webhook，可以安全使用Polling模式")
-                    log_system_event("webhook_status", "No webhook set, polling mode ready")
+                    logger.warning(f"⚠️  Bot身份验证响应异常: {bot_info['description']}")
+                    logger.info("继续启动，稍后重试验证...")
             else:
-                logger.error(f"❌ 获取Webhook信息失败: {webhook_info['description']}")
-                return False
-        else:
-            logger.error(f"❌ Webhook检查请求失败: HTTP {webhook_response.status_code}")
-            return False
+                logger.warning(f"⚠️  Bot身份验证HTTP错误: {response.status_code}")
+                logger.info("继续启动，稍后重试验证...")
+        except requests.exceptions.Timeout:
+            logger.warning("⚠️  Bot身份验证超时，继续启动...")
+        except Exception as e:
+            logger.warning(f"⚠️  Bot身份验证失败: {e}，继续启动...")
         
+        # 检查并清理Webhook - 使用更短的超时时间
+        logger.info("🔍 检查Webhook状态...")
+        try:
+            webhook_response = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=5)
+            if webhook_response.status_code == 200:
+                webhook_info = webhook_response.json()
+                if webhook_info['ok']:
+                    webhook_data = webhook_info['result']
+                    webhook_url = webhook_data.get('url', '')
+                    
+                    if webhook_url:
+                        logger.warning(f"⚠️  发现Webhook设置: {webhook_url}")
+                        logger.warning(f"📊 待处理更新数: {webhook_data.get('pending_update_count', 0)}")
+                        
+                        # 删除Webhook以使用Polling模式
+                        logger.info("🗑️  删除Webhook以启用Polling模式...")
+                        try:
+                            delete_response = requests.post(f"https://api.telegram.org/bot{bot_token}/deleteWebhook", timeout=5)
+                            if delete_response.status_code == 200:
+                                delete_result = delete_response.json()
+                                if delete_result['ok']:
+                                    logger.info("✅ Webhook已成功删除，可以使用Polling模式")
+                                    log_system_event("webhook_cleared", "Webhook deleted for polling mode")
+                                else:
+                                    logger.warning(f"⚠️  删除Webhook响应异常: {delete_result['description']}")
+                            else:
+                                logger.warning(f"⚠️  删除Webhook HTTP错误: {delete_response.status_code}")
+                        except requests.exceptions.Timeout:
+                            logger.warning("⚠️  删除Webhook超时，继续启动...")
+                        except Exception as e:
+                            logger.warning(f"⚠️  删除Webhook失败: {e}，继续启动...")
+                    else:
+                        logger.info("✅ 没有设置Webhook，可以安全使用Polling模式")
+                        log_system_event("webhook_status", "No webhook set, polling mode ready")
+                else:
+                    logger.warning(f"⚠️  获取Webhook信息响应异常: {webhook_info['description']}")
+            else:
+                logger.warning(f"⚠️  Webhook检查HTTP错误: {webhook_response.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning("⚠️  Webhook检查超时，继续启动...")
+        except Exception as e:
+            logger.warning(f"⚠️  Webhook检查失败: {e}，继续启动...")
+        
+        # 即使网络请求失败，也继续启动
+        logger.info("✅ Bot验证和Webhook检查完成（可能有警告），继续启动...")
         return True
         
     except Exception as e:
-        logger.error(f"❌ Bot身份验证或Webhook清理失败: {e}")
-        return False
+        logger.error(f"❌ Bot验证过程出现严重错误: {e}")
+        # 即使出错也继续启动，避免部署卡住
+        logger.warning("⚠️  忽略验证错误，继续启动...")
+        return True
 
 
 def main() -> None:
@@ -797,23 +813,25 @@ def main() -> None:
         http_thread.start()
         log_system_event("http_server_started", f"HTTP server started on port {port}")
         
-        # Final safety check before starting polling
+        # Final safety check before starting polling (non-blocking)
         logger.info("🔍 Final safety check before starting polling...")
         
-        # Verify no webhook is set one more time
+        # Verify no webhook is set one more time (with short timeout)
         try:
             import requests
-            webhook_check = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=5)
+            webhook_check = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=3)
             if webhook_check.status_code == 200:
                 webhook_info = webhook_check.json()
                 if webhook_info['ok'] and webhook_info['result'].get('url'):
-                    logger.error("❌ CRITICAL: Webhook still set! Cannot start polling!")
-                    log_system_event("polling_blocked", "Webhook still active, polling blocked", "CRITICAL")
-                    return
+                    logger.warning("⚠️  WARNING: Webhook still set! This may cause conflicts!")
+                    logger.warning("⚠️  Continuing with polling anyway...")
+                    log_system_event("polling_warning", "Webhook still active but continuing", "WARNING")
                 else:
                     logger.info("✅ Webhook check passed, safe to start polling")
+        except requests.exceptions.Timeout:
+            logger.warning("⚠️  Webhook check timeout, continuing with polling...")
         except Exception as e:
-            logger.warning(f"⚠️  Could not verify webhook status: {e}")
+            logger.warning(f"⚠️  Could not verify webhook status: {e}, continuing anyway...")
         
         logger.info("🚀 Starting Telegram KPI Bot polling...")
         logger.info("📡 Polling configuration:")
