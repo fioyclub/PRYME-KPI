@@ -391,9 +391,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             welcome_message = f"""
 🎉 **欢迎管理员 {user_name}！**
 
-您可以使用以下管理员命令：
+**管理员专属命令：**
 📊 /check - 查看销售代表的KPI完成情况
 🎯 /setting - 为销售代表设置月度KPI目标
+
+**销售代表功能（管理员也可使用）：**
+📝 /register - 注册个人信息
+📈 /kpi - 查看个人KPI进度
+🤝 /submitkpi - 提交会面记录和照片
+� */submitsale - 提交销售记录和照片
+
+**通用命令：**
+❓ /help - 获取帮助信息
 
 您的管理员权限已激活！
 """
@@ -408,6 +417,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 📈 /kpi - 查看个人KPI进度
 🤝 /submitkpi - 提交会面记录和照片
 💰 /submitsale - 提交销售记录和照片
+
+**通用命令：**
+❓ /help - 获取帮助信息
 
 请先使用 /register 注册您的信息！
 """
@@ -432,14 +444,22 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             help_message = """
 🔧 **管理员帮助**
 
-**可用命令：**
-📊 /check - 查看销售代表KPI
-🎯 /setting - 设置KPI目标
+**管理员专属命令：**
+📊 /check - 查看销售代表KPI完成情况
+🎯 /setting - 为销售代表设置月度KPI目标
+
+**销售代表功能（管理员也可使用）：**
+📝 /register - 注册个人信息
+📈 /kpi - 查看个人KPI进度
+🤝 /submitkpi - 提交会面记录和照片
+💰 /submitsale - 提交销售记录和照片
 
 **使用说明：**
-1. 使用 /check 选择销售代表查看其KPI完成情况
-2. 使用 /setting 为销售代表设置月度目标
-3. 所有数据自动保存到Google Sheets
+• 管理员命令：
+  1. 使用 /check 选择销售代表查看其KPI完成情况
+  2. 使用 /setting 为销售代表设置月度目标
+• 销售功能：管理员也可以像普通用户一样注册和提交KPI
+• 所有数据自动保存到Google Sheets
 """
         else:
             help_message = """
