@@ -577,24 +577,120 @@ def setup_handlers(application: Application) -> None:
         raise
 
 
+def verify_bot_identity_and_clear_webhook(bot_token: str) -> bool:
+    """
+    验证Bot身份并清理Webhook设置
+    
+    Args:
+        bot_token (str): Telegram Bot Token
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        import requests
+        
+        # 显示Token指纹
+        token_fingerprint = f"{bot_token[:10]}...{bot_token[-5:]}"
+        logger.info(f"🤖 Bot Token 指纹: {token_fingerprint}")
+        
+        # 获取Bot信息
+        response = requests.get(f"https://api.telegram.org/bot{bot_token}/getMe", timeout=10)
+        if response.status_code == 200:
+            bot_info = response.json()
+            if bot_info['ok']:
+                bot_data = bot_info['result']
+                logger.info(f"✅ Bot 身份验证成功:")
+                logger.info(f"   - Bot 名称: {bot_data['first_name']}")
+                logger.info(f"   - Bot 用户名: @{bot_data['username']}")
+                logger.info(f"   - Bot ID: {bot_data['id']}")
+                log_system_event("bot_identity_verified", f"Bot @{bot_data['username']} (ID: {bot_data['id']}) verified")
+            else:
+                logger.error(f"❌ Bot身份验证失败: {bot_info['description']}")
+                return False
+        else:
+            logger.error(f"❌ Bot身份验证请求失败: HTTP {response.status_code}")
+            return False
+        
+        # 检查并清理Webhook
+        logger.info("🔍 检查Webhook状态...")
+        webhook_response = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=10)
+        if webhook_response.status_code == 200:
+            webhook_info = webhook_response.json()
+            if webhook_info['ok']:
+                webhook_data = webhook_info['result']
+                webhook_url = webhook_data.get('url', '')
+                
+                if webhook_url:
+                    logger.warning(f"⚠️  发现Webhook设置: {webhook_url}")
+                    logger.warning(f"📊 待处理更新数: {webhook_data.get('pending_update_count', 0)}")
+                    
+                    # 删除Webhook以使用Polling模式
+                    logger.info("🗑️  删除Webhook以启用Polling模式...")
+                    delete_response = requests.post(f"https://api.telegram.org/bot{bot_token}/deleteWebhook", timeout=10)
+                    if delete_response.status_code == 200:
+                        delete_result = delete_response.json()
+                        if delete_result['ok']:
+                            logger.info("✅ Webhook已成功删除，可以使用Polling模式")
+                            log_system_event("webhook_cleared", "Webhook deleted for polling mode")
+                        else:
+                            logger.error(f"❌ 删除Webhook失败: {delete_result['description']}")
+                            return False
+                    else:
+                        logger.error(f"❌ 删除Webhook请求失败: HTTP {delete_response.status_code}")
+                        return False
+                else:
+                    logger.info("✅ 没有设置Webhook，可以安全使用Polling模式")
+                    log_system_event("webhook_status", "No webhook set, polling mode ready")
+            else:
+                logger.error(f"❌ 获取Webhook信息失败: {webhook_info['description']}")
+                return False
+        else:
+            logger.error(f"❌ Webhook检查请求失败: HTTP {webhook_response.status_code}")
+            return False
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Bot身份验证或Webhook清理失败: {e}")
+        return False
+
+
 def main() -> None:
     """
     Initialize and start the Telegram bot.
     
     This function:
-    1. Performs system health check
-    2. Initializes the authentication system
-    3. Creates the Application instance
-    4. Sets up all handlers
-    5. Starts the bot
-    6. Handles graceful shutdown
+    1. Verifies bot identity and clears webhook
+    2. Performs system health check
+    3. Initializes the authentication system
+    4. Creates the Application instance
+    5. Sets up all handlers
+    6. Starts the bot
+    7. Handles graceful shutdown
     """
     try:
-        logger.info("Starting Telegram KPI Bot initialization...")
+        logger.info("🚀 Starting Telegram KPI Bot initialization...")
         log_system_event("bot_startup", "Bot initialization started")
         
-        # Initialize authentication system first
-        logger.info("Initializing authentication system...")
+        # Get bot token first
+        bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        if not bot_token:
+            error_msg = "TELEGRAM_BOT_TOKEN environment variable not set"
+            logger.error(error_msg)
+            log_system_event("config_error", error_msg, "ERROR")
+            return
+        
+        # Step 1: Verify bot identity and clear webhook
+        logger.info("🔐 Step 1: Verifying bot identity and clearing webhook...")
+        if not verify_bot_identity_and_clear_webhook(bot_token):
+            error_msg = "Failed to verify bot identity or clear webhook"
+            logger.error(error_msg)
+            log_system_event("bot_verification_failed", error_msg, "ERROR")
+            return
+        
+        # Initialize authentication system
+        logger.info("🔧 Step 2: Initializing authentication system...")
         if not auth.initialize_auth_system():
             error_msg = "Failed to initialize authentication system"
             logger.error(error_msg)
@@ -659,18 +755,11 @@ def main() -> None:
             logger.warning(f"Warnings: {health_results['warnings']}")
             log_system_event("health_check_degraded", f"Warnings: {health_results['warnings']}", "WARNING")
         
-        # Get bot token from environment variable
-        bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-        if not bot_token:
-            error_msg = "TELEGRAM_BOT_TOKEN environment variable not set"
-            logger.error(error_msg)
-            log_system_event("config_error", error_msg, "ERROR")
-            return
-        
         # Create Application instance
-        logger.info("Creating Telegram Application instance...")
+        logger.info("🏗️  Step 6: Creating Telegram Application instance...")
         application = Application.builder().token(bot_token).build()
         log_system_event("app_created", "Telegram Application instance created")
+        logger.info("✅ Application instance created successfully")
         
         # Setup all handlers
         logger.info("Setting up bot handlers...")
@@ -708,10 +797,32 @@ def main() -> None:
         http_thread.start()
         log_system_event("http_server_started", f"HTTP server started on port {port}")
         
-        logger.info("Starting Telegram KPI Bot polling...")
-        log_system_event("bot_started", "Bot started and listening for updates")
+        # Final safety check before starting polling
+        logger.info("🔍 Final safety check before starting polling...")
         
-        # Start the bot
+        # Verify no webhook is set one more time
+        try:
+            import requests
+            webhook_check = requests.get(f"https://api.telegram.org/bot{bot_token}/getWebhookInfo", timeout=5)
+            if webhook_check.status_code == 200:
+                webhook_info = webhook_check.json()
+                if webhook_info['ok'] and webhook_info['result'].get('url'):
+                    logger.error("❌ CRITICAL: Webhook still set! Cannot start polling!")
+                    log_system_event("polling_blocked", "Webhook still active, polling blocked", "CRITICAL")
+                    return
+                else:
+                    logger.info("✅ Webhook check passed, safe to start polling")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not verify webhook status: {e}")
+        
+        logger.info("🚀 Starting Telegram KPI Bot polling...")
+        logger.info("📡 Polling configuration:")
+        logger.info("   - Allowed updates: ['message', 'callback_query']")
+        logger.info("   - Drop pending updates: True")
+        logger.info("   - Mode: Long Polling (getUpdates)")
+        log_system_event("bot_started", "Bot started and listening for updates via polling")
+        
+        # Start the bot with polling
         application.run_polling(
             allowed_updates=['message', 'callback_query'],
             drop_pending_updates=True
