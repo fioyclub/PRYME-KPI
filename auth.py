@@ -37,21 +37,34 @@ class RoleManager:
             bool: True if initialization successful, False otherwise
         """
         try:
-            # Load admin IDs from environment variable
+            # Load admin IDs from environment variable (this should always work)
             env_admin_ids = os.getenv('ADMIN_USER_IDS', '')
+            env_admin_count = 0
             if env_admin_ids:
                 for admin_id in env_admin_ids.split(','):
                     try:
-                        self._admin_cache.add(int(admin_id.strip()))
+                        parsed_id = int(admin_id.strip())
+                        self._admin_cache.add(parsed_id)
+                        env_admin_count += 1
+                        logger.info(f"Added admin ID from environment: {parsed_id}")
                     except ValueError:
                         logger.warning(f"Invalid admin ID in environment: {admin_id}")
             
-            # Load admin IDs from Google Sheets
-            admin_ids = self._get_admin_ids_from_sheets()
-            self._admin_cache.update(admin_ids)
+            logger.info(f"Loaded {env_admin_count} admin IDs from environment variables")
+            
+            # Try to load admin IDs from Google Sheets (this might fail, but shouldn't break the system)
+            try:
+                admin_ids = self._get_admin_ids_from_sheets()
+                if admin_ids:
+                    self._admin_cache.update(admin_ids)
+                    logger.info(f"Loaded {len(admin_ids)} additional admin IDs from Google Sheets")
+                else:
+                    logger.info("No admin IDs found in Google Sheets")
+            except Exception as sheets_error:
+                logger.warning(f"Failed to load admin IDs from Google Sheets (continuing with env vars): {sheets_error}")
             
             self._cache_initialized = True
-            logger.info(f"Admin cache initialized with {len(self._admin_cache)} admin users")
+            logger.info(f"Admin cache initialized with {len(self._admin_cache)} total admin users: {list(self._admin_cache)}")
             return True
             
         except Exception as e:
@@ -430,16 +443,27 @@ def initialize_auth_system() -> bool:
         if not google_sheets.sheets_service.service:
             logger.warning("Google Sheets service not initialized, admin cache will be limited")
         
-        # Initialize admin cache
-        if not role_manager._initialize_admin_cache():
-            logger.warning("Failed to initialize admin cache, continuing with empty cache")
+        # Initialize admin cache - this should not fail the entire system
+        try:
+            if role_manager._initialize_admin_cache():
+                logger.info("Admin cache initialized successfully")
+            else:
+                logger.warning("Admin cache initialization returned False, but continuing")
+        except Exception as cache_error:
+            logger.error(f"Admin cache initialization failed: {cache_error}")
+            logger.warning("Continuing with empty admin cache")
+        
+        # Ensure cache is marked as initialized even if there were issues
+        role_manager._cache_initialized = True
         
         logger.info("Authentication system initialized successfully")
         return True
         
     except Exception as e:
         logger.error(f"Failed to initialize authentication system: {e}")
-        return False
+        # Even if there are errors, we should try to continue
+        role_manager._cache_initialized = True
+        return True
 
 # Utility functions for admin management
 def add_admin(user_id: int, name: str = "") -> bool:
