@@ -376,7 +376,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
         # Check user role
         import auth
+        
+        # Debug logging for admin check
+        logger.info(f"Checking admin status for user {user_id}")
+        logger.info(f"Admin cache initialized: {auth.role_manager._cache_initialized}")
+        logger.info(f"Admin cache contents: {list(auth.role_manager._admin_cache)}")
+        
+        is_admin = auth.is_admin(user_id)
         user_role = auth.get_user_role(user_id)
+        
+        logger.info(f"User {user_id} - is_admin: {is_admin}, role: {user_role}")
         
         if user_role == 'admin':
             welcome_message = f"""
