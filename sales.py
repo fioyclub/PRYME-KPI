@@ -810,7 +810,7 @@ async def meetup_photo_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
             # Import google_drive here to avoid circular imports
             import google_drive
             
-            photo_link = google_drive.upload_photo_from_telegram(
+            photo_link = await google_drive.upload_photo_from_telegram(
                 telegram_file, 
                 filename, 
                 'meetups',
@@ -1190,7 +1190,7 @@ async def sales_photo_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
             # Import google_drive here to avoid circular imports
             import google_drive
             
-            photo_link = google_drive.upload_photo_from_telegram(
+            photo_link = await google_drive.upload_photo_from_telegram(
                 telegram_file, 
                 filename, 
                 'sales',
