@@ -670,7 +670,7 @@ def cleanup_temp_files():
         logger.error(f"[MEMORY] Error during temp file cleanup: {e}")
         return 0
 
-def upload_photo_from_telegram(telegram_file, filename: str, folder_type: str, year: int = None, month: int = None) -> Optional[str]:
+async def upload_photo_from_telegram(telegram_file, filename: str, folder_type: str, year: int = None, month: int = None) -> Optional[str]:
     """
     Upload photo from Telegram file object with memory-efficient handling
     
@@ -688,7 +688,7 @@ def upload_photo_from_telegram(telegram_file, filename: str, folder_type: str, y
         logger.info(f"Processing Telegram file for upload: {filename}")
         
         # Download file data from Telegram
-        file_data = telegram_file.download_as_bytearray()
+        file_data = await telegram_file.download_as_bytearray()
         
         # Convert to bytes and upload
         file_bytes = bytes(file_data)
