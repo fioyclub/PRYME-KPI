@@ -352,7 +352,7 @@ def register_user(user_data: Dict[str, Any]) -> bool:
         ])
         
         # Insert user data
-        range_name = f'{USERS_SHEET}!A:G'
+        range_name = f"'{USERS_SHEET}'!A:G"
         body = {
             'values': values
         }
@@ -383,8 +383,13 @@ def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
             logger.error("Google Sheets service not initialized")
             return None
         
+        # Ensure Users sheet exists
+        _ensure_sheet_exists(USERS_SHEET, [
+            'User ID', 'Name', 'Nationality', 'Phone', 'Upline', 'Registration Date', 'Role'
+        ])
+        
         # Read all user data
-        range_name = f'{USERS_SHEET}!A:G'
+        range_name = f"'{USERS_SHEET}'!A:G"
         result = sheets_service.service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=range_name
@@ -428,8 +433,13 @@ def get_all_users() -> list:
             logger.error("Google Sheets service not initialized")
             return []
         
+        # Ensure Users sheet exists
+        _ensure_sheet_exists(USERS_SHEET, [
+            'User ID', 'Name', 'Nationality', 'Phone', 'Upline', 'Registration Date', 'Role'
+        ])
+        
         # Read all user data
-        range_name = f'{USERS_SHEET}!A:G'
+        range_name = f"'{USERS_SHEET}'!A:G"
         result = sheets_service.service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=range_name
@@ -508,7 +518,7 @@ def _ensure_sheet_exists(sheet_name: str, headers: list) -> bool:
             logger.info(f"Created sheet: {sheet_name}")
         
         # Check if headers exist
-        range_name = f'{sheet_name}!1:1'
+        range_name = f"'{sheet_name}'!1:1"
         result = sheets_service.service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=range_name
@@ -568,7 +578,7 @@ def set_monthly_targets(user_id: int, month: int, year: int, meetup_target: int,
         if existing_target:
             # Update existing target
             # Find the row to update
-            range_name = f'{TARGETS_SHEET}!A:F'
+            range_name = f"'{TARGETS_SHEET}'!A:F"
             result = sheets_service.service.spreadsheets().values().get(
                 spreadsheetId=SPREADSHEET_ID,
                 range=range_name
@@ -590,7 +600,7 @@ def set_monthly_targets(user_id: int, month: int, year: int, meetup_target: int,
             
             if row_index:
                 # Update the specific row
-                update_range = f'{TARGETS_SHEET}!A{row_index}:F{row_index}'
+                update_range = f"'{TARGETS_SHEET}'!A{row_index}:F{row_index}"
                 update_values = [[user_id, month, year, meetup_target, sales_target, current_date]]
                 
                 body = {
@@ -609,7 +619,7 @@ def set_monthly_targets(user_id: int, month: int, year: int, meetup_target: int,
             # Insert new target
             values = [[user_id, month, year, meetup_target, sales_target, current_date]]
             
-            range_name = f'{TARGETS_SHEET}!A:F'
+            range_name = f"'{TARGETS_SHEET}'!A:F"
             body = {
                 'values': values
             }
@@ -649,8 +659,13 @@ def get_monthly_targets(user_id: int, month: int, year: int) -> Optional[Dict[st
             logger.error("Google Sheets service not initialized")
             return None
         
+        # Ensure Targets sheet exists
+        _ensure_sheet_exists(TARGETS_SHEET, [
+            'User ID', 'Month', 'Year', 'Meetup Target', 'Sales Target', 'Created Date'
+        ])
+        
         # Read all target data
-        range_name = f'{TARGETS_SHEET}!A:F'
+        range_name = f"'{TARGETS_SHEET}'!A:F"
         result = sheets_service.service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=range_name
@@ -699,8 +714,13 @@ def get_user_targets(user_id: int) -> List[Dict[str, Any]]:
             logger.error("Google Sheets service not initialized")
             return []
         
+        # Ensure Targets sheet exists
+        _ensure_sheet_exists(TARGETS_SHEET, [
+            'User ID', 'Month', 'Year', 'Meetup Target', 'Sales Target', 'Created Date'
+        ])
+        
         # Read all target data
-        range_name = f'{TARGETS_SHEET}!A:F'
+        range_name = f"'{TARGETS_SHEET}'!A:F"
         result = sheets_service.service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=range_name
@@ -771,7 +791,7 @@ def record_kpi_submission(user_id: int, record_type: str, value: Union[int, floa
         # Prepare data for insertion
         values = [[user_id, record_date_str, record_type, value, photo_link, submission_date]]
         
-        range_name = f'{RECORDS_SHEET}!A:F'
+        range_name = f"'{RECORDS_SHEET}'!A:F"
         body = {
             'values': values
         }
@@ -811,8 +831,13 @@ def get_user_kpi_records(user_id: int, month: Optional[int] = None, year: Option
             logger.error("Google Sheets service not initialized")
             return []
         
+        # Ensure KPI Records sheet exists
+        _ensure_sheet_exists(RECORDS_SHEET, [
+            'User ID', 'Record Date', 'Record Type', 'Value', 'Photo Link', 'Submission Date'
+        ])
+        
         # Read all KPI records
-        range_name = f'{RECORDS_SHEET}!A:F'
+        range_name = f"'{RECORDS_SHEET}'!A:F"
         result = sheets_service.service.spreadsheets().values().get(
             spreadsheetId=SPREADSHEET_ID,
             range=range_name
