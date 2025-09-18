@@ -399,7 +399,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 📝 /register - 注册个人信息
 📈 /kpi - 查看个人KPI进度
 🤝 /submitkpi - 提交会面记录和照片
-� */submitsale - 提交销售记录和照片
+💰 /submitsale - 提交销售记录和照片
 
 **通用命令：**
 ❓ /help - 获取帮助信息
