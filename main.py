@@ -16,6 +16,11 @@ from telegram.ext import ContextTypes
 from dotenv import load_dotenv
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+from typing import Dict, Any, Optional
+import fcntl
+import sys
+import atexit
+import signal
 
 # Import error handling system first
 from error_handler import setup_logging, error_handler, log_system_event, check_system_health
@@ -31,6 +36,116 @@ setup_logging(
     log_file=os.getenv('LOG_FILE', 'kpi_bot.log')
 )
 logger = logging.getLogger(__name__)
+
+# Global variables for process management
+lock_file = None
+application_instance = None
+
+
+def acquire_process_lock() -> bool:
+    """
+    Acquire a process lock to prevent multiple instances from running.
+    
+    Returns:
+        bool: True if lock acquired successfully, False otherwise
+    """
+    global lock_file
+    
+    try:
+        # Create lock file path
+        lock_file_path = os.path.join(os.getcwd(), 'kpi_bot.lock')
+        
+        # Try to open and lock the file
+        lock_file = open(lock_file_path, 'w')
+        
+        # For Windows compatibility, use a different approach
+        if os.name == 'nt':  # Windows
+            try:
+                # Try to write PID to lock file
+                lock_file.write(str(os.getpid()))
+                lock_file.flush()
+                logger.info(f"✅ Process lock acquired (PID: {os.getpid()})")
+                log_system_event("process_lock_acquired", f"Lock acquired by PID {os.getpid()}")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Failed to acquire process lock: {e}")
+                if lock_file:
+                    lock_file.close()
+                    lock_file = None
+                return False
+        else:  # Unix-like systems
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_file.write(str(os.getpid()))
+                lock_file.flush()
+                logger.info(f"✅ Process lock acquired (PID: {os.getpid()})")
+                log_system_event("process_lock_acquired", f"Lock acquired by PID {os.getpid()}")
+                return True
+            except (IOError, OSError) as e:
+                logger.error(f"❌ Another instance is already running: {e}")
+                logger.error("❌ Cannot start multiple instances of the bot")
+                if lock_file:
+                    lock_file.close()
+                    lock_file = None
+                return False
+                
+    except Exception as e:
+        logger.error(f"❌ Error acquiring process lock: {e}")
+        if lock_file:
+            lock_file.close()
+            lock_file = None
+        return False
+
+
+def release_process_lock() -> None:
+    """
+    Release the process lock.
+    """
+    global lock_file
+    
+    try:
+        if lock_file:
+            if os.name != 'nt':  # Unix-like systems
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+            lock_file = None
+            
+            # Remove lock file
+            lock_file_path = os.path.join(os.getcwd(), 'kpi_bot.lock')
+            if os.path.exists(lock_file_path):
+                os.remove(lock_file_path)
+                
+            logger.info("✅ Process lock released")
+            log_system_event("process_lock_released", "Process lock released successfully")
+            
+    except Exception as e:
+        logger.error(f"❌ Error releasing process lock: {e}")
+
+
+def signal_handler(signum, frame):
+    """
+    Handle system signals for graceful shutdown.
+    """
+    logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
+    log_system_event("signal_received", f"Signal {signum} received, shutting down")
+    
+    # Stop the application if it exists
+    global application_instance
+    if application_instance:
+        try:
+            application_instance.stop_running()
+            logger.info("✅ Application stopped successfully")
+        except Exception as e:
+            logger.error(f"❌ Error stopping application: {e}")
+    
+    # Perform graceful shutdown
+    perform_graceful_shutdown()
+    
+    # Release process lock
+    release_process_lock()
+    
+    # Exit
+    sys.exit(0)
 
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -690,17 +805,36 @@ def main() -> None:
     Initialize and start the Telegram bot.
     
     This function:
-    1. Verifies bot identity and clears webhook
-    2. Performs system health check
-    3. Initializes the authentication system
-    4. Creates the Application instance
-    5. Sets up all handlers
-    6. Starts the bot
-    7. Handles graceful shutdown
+    1. Acquires process lock to prevent multiple instances
+    2. Verifies bot identity and clears webhook
+    3. Performs system health check
+    4. Initializes the authentication system
+    5. Creates the Application instance
+    6. Sets up all handlers
+    7. Starts the bot
+    8. Handles graceful shutdown
     """
+    global application_instance
+    
     try:
         logger.info("🚀 Starting Telegram KPI Bot initialization...")
         log_system_event("bot_startup", "Bot initialization started")
+        
+        # Step 0: Acquire process lock to prevent multiple instances
+        logger.info("🔒 Step 0: Acquiring process lock...")
+        if not acquire_process_lock():
+            logger.error("❌ Failed to acquire process lock. Another instance may be running.")
+            logger.error("❌ Exiting to prevent conflicts...")
+            log_system_event("startup_aborted", "Process lock acquisition failed", "CRITICAL")
+            return
+        
+        # Register signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        logger.info("✅ Signal handlers registered")
+        
+        # Register cleanup function to run on exit
+        atexit.register(release_process_lock)
         
         # Get bot token first
         bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -804,6 +938,7 @@ def main() -> None:
         # Create Application instance
         logger.info("🏗️  Step 6: Creating Telegram Application instance...")
         application = Application.builder().token(bot_token).build()
+        application_instance = application  # Store globally for signal handler
         log_system_event("app_created", "Telegram Application instance created")
         logger.info("✅ Application instance created successfully")
         
@@ -912,6 +1047,9 @@ def main() -> None:
     finally:
         # Perform graceful shutdown
         perform_graceful_shutdown()
+        
+        # Release process lock
+        release_process_lock()
         
         logger.info("Bot shutdown completed")
         log_system_event("bot_shutdown", "Bot shutdown completed")
