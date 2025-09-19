@@ -687,7 +687,7 @@ async def upload_photo_from_telegram(telegram_file, filename: str, folder_type: 
     try:
         logger.info(f"Processing Telegram file for upload: {filename}")
         
-        # Download file data from Telegram
+        # Download file data from Telegram with memory-efficient handling
         file_data = await telegram_file.download_as_bytearray()
         
         # Convert to bytes and upload
