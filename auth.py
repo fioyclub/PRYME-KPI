@@ -87,7 +87,7 @@ class RoleManager:
             google_sheets._ensure_sheet_exists(ADMIN_SHEET, ['User ID', 'Name', 'Added Date'])
             
             # Read admin data
-            range_name = f'{ADMIN_SHEET}!A:C'
+            range_name = f"'{ADMIN_SHEET}'!A:C"
             result = google_sheets.sheets_service.service.spreadsheets().values().get(
                 spreadsheetId=google_sheets.SPREADSHEET_ID,
                 range=range_name
@@ -170,7 +170,7 @@ class RoleManager:
             from datetime import datetime
             values = [[user_id, name, datetime.now().isoformat()]]
             
-            range_name = f'{ADMIN_SHEET}!A:C'
+            range_name = f"'{ADMIN_SHEET}'!A:C"
             body = {'values': values}
             
             google_sheets.sheets_service.service.spreadsheets().values().append(
@@ -211,7 +211,7 @@ class RoleManager:
                 return True
             
             # Find and remove from Google Sheets
-            range_name = f'{ADMIN_SHEET}!A:C'
+            range_name = f"'{ADMIN_SHEET}'!A:C"
             result = google_sheets.sheets_service.service.spreadsheets().values().get(
                 spreadsheetId=google_sheets.SPREADSHEET_ID,
                 range=range_name
@@ -232,7 +232,7 @@ class RoleManager:
                 # Delete the row (Google Sheets API doesn't have direct row deletion,
                 # so we'll clear the row and let it be handled manually or implement
                 # a more complex solution)
-                clear_range = f'{ADMIN_SHEET}!A{row_index}:C{row_index}'
+                clear_range = f"'{ADMIN_SHEET}'!A{row_index}:C{row_index}"
                 google_sheets.sheets_service.service.spreadsheets().values().clear(
                     spreadsheetId=google_sheets.SPREADSHEET_ID,
                     range=clear_range
@@ -277,8 +277,11 @@ class RoleManager:
                 logger.error("Google Sheets service not initialized")
                 return []
             
+            # Ensure Admin_Config sheet exists
+            google_sheets._ensure_sheet_exists(ADMIN_SHEET, ['User ID', 'Name', 'Added Date'])
+            
             # Read admin data
-            range_name = f'{ADMIN_SHEET}!A:C'
+            range_name = f"'{ADMIN_SHEET}'!A:C"
             result = google_sheets.sheets_service.service.spreadsheets().values().get(
                 spreadsheetId=google_sheets.SPREADSHEET_ID,
                 range=range_name
