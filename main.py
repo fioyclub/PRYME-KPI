@@ -102,7 +102,6 @@ import auth
 import admin
 import sales
 import utils
-from utils import log_system_event
 
 # Load environment variables
 load_dotenv()
