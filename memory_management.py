@@ -15,10 +15,22 @@ import tempfile
 import logging
 import weakref
 import atexit
+import sys
 from typing import Optional, Any, List, Dict
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+
+# Platform-specific file locking
+try:
+    if sys.platform == 'win32':
+        import msvcrt
+        LOCK_AVAILABLE = True
+    else:
+        import fcntl
+        LOCK_AVAILABLE = True
+except ImportError:
+    LOCK_AVAILABLE = False
 
 # Try to import APScheduler, gracefully handle if not available
 try:
@@ -450,9 +462,77 @@ class ScheduledMemoryManager:
         self.is_running = False
         self.cleanup_interval_minutes = 15
         self.scheduler_type = 'background'  # 'background' or 'asyncio'
+        self.lock_file = None
+        self.lock_file_path = os.path.join(tempfile.gettempdir(), 'pryme_scheduler.lock')
         
         # Register shutdown handler
         atexit.register(self.shutdown)
+    
+    def _acquire_scheduler_lock(self) -> bool:
+        """
+        Acquire scheduler lock to prevent multiple instances
+        
+        Returns:
+            bool: True if lock acquired successfully
+        """
+        if not LOCK_AVAILABLE:
+            logger.warning("[MEMORY] File locking not available, skipping lock check")
+            return True
+        
+        try:
+            self.lock_file = open(self.lock_file_path, 'w')
+            
+            if sys.platform == 'win32':
+                # Windows file locking
+                msvcrt.locking(self.lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                # Unix file locking
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            
+            # Write process info to lock file
+            self.lock_file.write(f"scheduler_pid:{os.getpid()}\n")
+            self.lock_file.write(f"start_time:{datetime.now().isoformat()}\n")
+            self.lock_file.flush()
+            
+            logger.info(f"[MEMORY] Scheduler lock acquired: {self.lock_file_path}")
+            return True
+            
+        except (IOError, OSError) as e:
+            logger.warning(f"[MEMORY] Could not acquire scheduler lock: {e}")
+            logger.warning("[MEMORY] Another scheduler instance may be running")
+            if self.lock_file:
+                try:
+                    self.lock_file.close()
+                except:
+                    pass
+                self.lock_file = None
+            return False
+        except Exception as e:
+            logger.error(f"[MEMORY] Unexpected error acquiring scheduler lock: {e}")
+            return False
+    
+    def _release_scheduler_lock(self):
+        """
+        Release scheduler lock
+        """
+        if self.lock_file:
+            try:
+                if sys.platform == 'win32':
+                    msvcrt.locking(self.lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+                
+                self.lock_file.close()
+                self.lock_file = None
+                
+                # Remove lock file
+                if os.path.exists(self.lock_file_path):
+                    os.unlink(self.lock_file_path)
+                
+                logger.info("[MEMORY] Scheduler lock released")
+                
+            except Exception as e:
+                logger.error(f"[MEMORY] Error releasing scheduler lock: {e}")
     
     def setup_scheduler(self, scheduler_type: str = 'background', 
                        cleanup_interval_minutes: int = 15) -> bool:
@@ -524,6 +604,12 @@ class ScheduledMemoryManager:
                 logger.warning("[MEMORY] Scheduled cleanup already running")
                 return True
             
+            # Try to acquire scheduler lock to prevent multiple instances
+            if not self._acquire_scheduler_lock():
+                logger.warning("[MEMORY] Could not acquire scheduler lock - another instance may be running")
+                logger.warning("[MEMORY] Skipping scheduler startup to prevent conflicts")
+                return False
+            
             self.scheduler.start()
             self.is_running = True
             
@@ -536,6 +622,8 @@ class ScheduledMemoryManager:
             
         except Exception as e:
             logger.error(f"[MEMORY] Error starting scheduled cleanup: {e}")
+            # Release lock if we acquired it but failed to start
+            self._release_scheduler_lock()
             return False
     
     def stop_scheduled_cleanup(self) -> bool:
@@ -567,6 +655,10 @@ class ScheduledMemoryManager:
             if self.is_running:
                 logger.info("[MEMORY] Shutting down scheduled memory manager")
                 self.stop_scheduled_cleanup()
+            
+            # Always try to release the lock
+            self._release_scheduler_lock()
+            
         except Exception as e:
             logger.error(f"[MEMORY] Error during shutdown: {e}")
     
@@ -617,12 +709,15 @@ class ScheduledMemoryManager:
         try:
             status = {
                 'scheduler_available': SCHEDULER_AVAILABLE,
+                'lock_available': LOCK_AVAILABLE,
                 'is_running': self.is_running,
                 'scheduler_type': self.scheduler_type,
                 'cleanup_interval_minutes': self.cleanup_interval_minutes,
                 'scheduler_state': None,
                 'next_run_time': None,
-                'job_count': 0
+                'job_count': 0,
+                'lock_acquired': self.lock_file is not None,
+                'lock_file_path': self.lock_file_path
             }
             
             if self.scheduler and self.is_running:
