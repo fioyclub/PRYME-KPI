@@ -2,13 +2,88 @@
 """
 Telegram KPI Bot - Main Entry Point
 
-This is the main application entry point for the Telegram KPI Bot.
-It initializes the bot, sets up handlers, and manages the application lifecycle.
+This bot helps manage KPIs and performance metrics through Telegram.
+It provides authentication, data management, and reporting capabilities.
+
+Features:
+- User authentication and role management
+- KPI data collection and analysis
+- Automated reporting
+- Google Sheets integration
+- Google Drive file management
+
+Author: Assistant
+Version: 2.0
+Last Updated: 2024
 """
 
-import logging
+# ============================================================================
+# 单例锁机制 - 防止多实例启动
+# ============================================================================
 import os
+import sys
+import socket
+import platform
+import atexit
+
+# 获取系统信息用于日志
+HOST_NAME = socket.gethostname()
+PROCESS_ID = os.getpid()
+MODE = os.getenv('RENDER', 'local')  # Render环境或本地环境
+
+print(f"[STARTUP] MODE={MODE} | HOST={HOST_NAME} | PID={PROCESS_ID}")
+
+# 文件锁机制 - 在Windows上使用不同的路径
+if platform.system() == 'Windows':
+    LOCK_FILE_PATH = os.path.join(os.getenv('TEMP', 'C:\\temp'), 'pryme_bot.lock')
+else:
+    LOCK_FILE_PATH = '/tmp/pryme_bot.lock'
+
+try:
+    # 尝试获取文件锁
+    if platform.system() == 'Windows':
+        # Windows使用文件存在性检查
+        if os.path.exists(LOCK_FILE_PATH):
+            with open(LOCK_FILE_PATH, 'r') as f:
+                existing_pid = f.read().strip()
+            print(f"[LOCK] Another bot instance detected (PID: {existing_pid}). Exiting.")
+            sys.exit(0)
+        else:
+            # 创建锁文件
+            with open(LOCK_FILE_PATH, 'w') as f:
+                f.write(str(PROCESS_ID))
+            print(f"[LOCK] File lock acquired: {LOCK_FILE_PATH}")
+    else:
+        # Unix/Linux使用fcntl锁
+        import fcntl
+        lock_fd = os.open(LOCK_FILE_PATH, os.O_CREAT | os.O_RDWR, 0o644)
+        fcntl.lockf(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # 写入PID到锁文件
+        os.write(lock_fd, str(PROCESS_ID).encode())
+        print(f"[LOCK] File lock acquired: {LOCK_FILE_PATH}")
+except Exception as e:
+    print(f"[LOCK] Another bot instance detected or lock failed: {e}")
+    print(f"[LOCK] MODE={MODE} | HOST={HOST_NAME} | PID={PROCESS_ID} - Exiting.")
+    sys.exit(0)
+
+# 注册清理函数
+def cleanup_lock_file():
+    try:
+        if os.path.exists(LOCK_FILE_PATH):
+            os.remove(LOCK_FILE_PATH)
+            print(f"[LOCK] Lock file cleaned up: {LOCK_FILE_PATH}")
+    except Exception as e:
+        print(f"[LOCK] Failed to cleanup lock file: {e}")
+
+atexit.register(cleanup_lock_file)
+
+# ============================================================================
+# 正常导入模块
+# ============================================================================
+import logging
 import threading
+import time
+import asyncio
 from datetime import datetime
 from telegram.ext import Application
 from telegram import Update
@@ -17,15 +92,17 @@ from dotenv import load_dotenv
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 from typing import Dict, Any, Optional
-import fcntl
-import sys
-import atexit
 import signal
+import atexit
 
 # Import error handling system first
 from error_handler import setup_logging, error_handler, log_system_event, check_system_health
 
 import auth
+import admin
+import sales
+import utils
+from utils import log_system_event
 
 # Load environment variables
 load_dotenv()
@@ -998,19 +1075,86 @@ def main() -> None:
         except Exception as e:
             logger.warning(f"⚠️  Could not verify webhook status: {e}, continuing anyway...")
         
-        logger.info("🚀 Starting Telegram KPI Bot polling...")
+        logger.info("🚀 Starting Telegram KPI Bot with enhanced conflict prevention...")
         logger.info("📡 Polling configuration:")
         logger.info("   - Allowed updates: ['message', 'callback_query']")
         logger.info("   - Drop pending updates: True")
-        logger.info("   - Mode: Long Polling (getUpdates)")
+        logger.info("   - Mode: Long Polling (getUpdates) with graceful shutdown")
         log_system_event("bot_started", "Bot started and listening for updates via polling")
         
-        # Start the bot with polling (with conflict handling)
+        # ============================================================================
+        # 优雅关停机制 - 使用asyncio事件控制应用生命周期
+        # ============================================================================
+        async def run_bot_with_graceful_shutdown():
+            """运行Bot并支持优雅关停"""
+            stop_event = asyncio.Event()
+            
+            def graceful_shutdown_handler(*args):
+                """优雅关停处理器"""
+                logger.info("🛑 Graceful shutdown signal received...")
+                stop_event.set()
+            
+            # 注册信号处理器
+            try:
+                loop = asyncio.get_running_loop()
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    loop.add_signal_handler(sig, graceful_shutdown_handler)
+                logger.info("✅ Graceful shutdown handlers registered")
+            except NotImplementedError:
+                # Windows不支持add_signal_handler，使用传统方式
+                signal.signal(signal.SIGINT, graceful_shutdown_handler)
+                signal.signal(signal.SIGTERM, graceful_shutdown_handler)
+                logger.info("✅ Graceful shutdown handlers registered (Windows mode)")
+            
+            try:
+                # 轮询前清场 - 强制删除webhook并清理待处理更新
+                logger.info("🧹 Step: Pre-polling cleanup (clearing webhook and pending updates)...")
+                await application.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Webhook cleared and pending updates dropped")
+                
+                # 初始化应用
+                await application.initialize()
+                await application.start()
+                logger.info("✅ Application initialized and started")
+                
+                # 启动轮询（非阻塞方式）
+                logger.info("🚀 Starting polling with graceful shutdown support...")
+                
+                # 创建轮询任务
+                polling_task = asyncio.create_task(
+                    application.updater.start_polling(
+                        allowed_updates=['message', 'callback_query'],
+                        drop_pending_updates=True
+                    )
+                )
+                
+                logger.info("📡 Bot is now polling for updates...")
+                log_system_event("polling_started", "Bot polling started successfully")
+                
+                # 等待停止信号
+                await stop_event.wait()
+                
+                logger.info("🛑 Stop signal received, initiating graceful shutdown...")
+                
+                # 停止轮询
+                polling_task.cancel()
+                try:
+                    await polling_task
+                except asyncio.CancelledError:
+                    logger.info("✅ Polling task cancelled")
+                
+                # 停止应用
+                await application.stop()
+                await application.shutdown()
+                logger.info("✅ Application stopped and shutdown completed")
+                
+            except Exception as e:
+                logger.error(f"❌ Error during bot execution: {e}")
+                raise
+        
+        # 启动Bot（使用asyncio运行）
         try:
-            application.run_polling(
-                allowed_updates=['message', 'callback_query'],
-                drop_pending_updates=True
-            )
+            asyncio.run(run_bot_with_graceful_shutdown())
         except Exception as polling_error:
             if 'conflict' in str(polling_error).lower():
                 logger.error("🚨 Polling conflict detected! Another instance may be running.")
@@ -1018,15 +1162,12 @@ def main() -> None:
                 import time
                 time.sleep(30)
                 
-                # Try to clear any webhook and retry once
+                # 再次尝试清理并重试
                 try:
                     import requests
                     requests.post(f"https://api.telegram.org/bot{bot_token}/deleteWebhook", timeout=5)
-                    logger.info("Cleared webhook and retrying polling...")
-                    application.run_polling(
-                        allowed_updates=['message', 'callback_query'],
-                        drop_pending_updates=True
-                    )
+                    logger.info("Cleared webhook and retrying...")
+                    asyncio.run(run_bot_with_graceful_shutdown())
                 except Exception as retry_error:
                     logger.error(f"Retry failed: {retry_error}")
                     raise
